@@ -66,7 +66,9 @@ async function run(env) {
   const end = env.WATCH_END;
   if (today > end) return console.log(`감시 기간(${end}) 종료 - 건너뜀`);
 
-  for (const [item, name] of Object.entries(DESIGNERS)) {
+  // TEST_DESIGNERS="4328420=유나(테스트),..." 로 감시 대상을 임시 추가
+  const extra = (env.TEST_DESIGNERS ?? "").split(",").filter(Boolean).map((p) => p.split("="));
+  for (const [item, name] of [...Object.entries(DESIGNERS), ...extra]) {
     const free = await fetchFreeSlots(item, today, end);
     const prevRaw = await env.STATE.get(item);
     const prev = new Set(prevRaw ? JSON.parse(prevRaw) : []);
