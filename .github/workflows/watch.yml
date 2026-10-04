@@ -27,3 +27,4 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           WATCH_END: ${{ vars.WATCH_END }}
+          TZ: Asia/Seoul
