@@ -30,7 +30,9 @@ jobs:
           restore-keys: state-
 
       - if: ${{ inputs.test }}
-        run: test -n "$SLACK_WEBHOOK_URL" && python3 -c "import watch; watch.notify(':white_check_mark: GitHub Actions에서 보낸 빈자리 알림 테스트입니다.')"
+        run: |
+          test -n "$SLACK_WEBHOOK_URL"
+          python3 -c "import watch; watch.notify(':white_check_mark: GitHub Actions에서 보낸 빈자리 알림 테스트입니다.')"
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
