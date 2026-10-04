@@ -37,7 +37,25 @@ async function fetchFreeSlots(item, start, end) {
     .sort();
 }
 
-function formatMessage(name, item, slots) {
+// Slack 인앱 브라우저 대신 로그인된 네이버 앱으로 예약 페이지를 여는 중계 페이지
+function appRedirectPage(item) {
+  const target = encodeURIComponent(bookingUrl(item));
+  const ios = `naversearchapp://inappbrowser?url=${target}&target=new&version=6`;
+  const android = `intent://inappbrowser?url=${target}&target=new&version=6#Intent;scheme=naversearchapp;package=com.nhn.android.search;end`;
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>네이버 앱으로 이동</title>
+<style>body{font-family:-apple-system,sans-serif;text-align:center;padding:48px 16px}
+a{display:block;margin:12px auto;max-width:320px;padding:14px;border-radius:8px;text-decoration:none;font-size:17px}
+.app{background:#03c75a;color:#fff}.web{color:#555;border:1px solid #ccc}</style></head><body>
+<p>네이버 앱에서 예약 페이지를 엽니다…</p>
+<a class="app" id="app" href="${ios}">네이버 앱에서 열기</a>
+<a class="web" href="${bookingUrl(item)}">웹으로 열기</a>
+<script>var u=/Android/i.test(navigator.userAgent)?${JSON.stringify(android)}:${JSON.stringify(ios)};
+document.getElementById("app").href=u;location.href=u;</script></body></html>`;
+  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+function formatMessage(name, item, slots, linkBase) {
   const byDay = {};
   for (const s of slots) (byDay[s.slice(0, 10)] ??= []).push(s.slice(11));
   const lines = [`:scissors: *${name}* 디자이너 빈자리 ${slots.length}칸이 새로 열렸습니다`];
@@ -45,7 +63,7 @@ function formatMessage(name, item, slots) {
     const wd = "일월화수목금토"[new Date(`${day}T00:00:00Z`).getUTCDay()];
     lines.push(`• ${day}(${wd}) ${times.join(", ")}`);
   }
-  lines.push(`<${bookingUrl(item)}|예약하러 가기>`);
+  lines.push(linkBase ? `<${linkBase}/go/${item}|네이버 앱으로 예약하기>` : `<${bookingUrl(item)}|예약하러 가기>`);
   return lines.join("\n");
 }
 
@@ -74,13 +92,17 @@ async function run(env) {
     const prev = new Set(prevRaw ? JSON.parse(prevRaw) : []);
     const fresh = free.filter((s) => !prev.has(s));
     console.log(`${name}: free=${free.length} new=${fresh.length}`);
-    if (fresh.length) await notify(env, formatMessage(name, item, fresh));
+    if (fresh.length) await notify(env, formatMessage(name, item, fresh, env.APP_LINK_BASE));
     const next = JSON.stringify(free);
     if (next !== prevRaw) await env.STATE.put(item, next); // KV 무료 write 한도(1000/일) 보호
   }
 }
 
 export default {
+  async fetch(request) {
+    const m = new URL(request.url).pathname.match(/^\/go\/(\d{1,12})$/);
+    return m ? appRedirectPage(m[1]) : new Response("Not Found", { status: 404 });
+  },
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(run(env));
   },

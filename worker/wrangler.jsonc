@@ -2,11 +2,11 @@
   "name": "naver-slot-watch",
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
-  // HTTP 엔드포인트 없이 Cron으로만 실행한다
-  "workers_dev": false,
+  // workers.dev 에는 네이버 앱 중계 페이지(/go/<itemId>)만 노출한다
+  "workers_dev": true,
   "preview_urls": false,
   "triggers": { "crons": ["* * * * *"] },
-  "vars": { "WATCH_END": "2026-10-31" },
+  "vars": { "WATCH_END": "2026-10-31", "APP_LINK_BASE": "https://naver-slot-watch.memeyeop.workers.dev" },
   "kv_namespaces": [{ "binding": "STATE", "id": "b9accf9feb8a454b91efc941f2c05813" }],
   "observability": { "enabled": true }
   // SLACK_WEBHOOK_URL 은 `wrangler secret put` 으로 등록
