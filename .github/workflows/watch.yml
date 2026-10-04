@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      test:
+        description: "Slack 테스트 메시지만 보내기 (감시·state 갱신 안 함)"
+        type: boolean
+        default: false
 
 concurrency:
   group: watch
@@ -18,12 +23,19 @@ jobs:
 
       # 직전 실행의 state.json 복원 (캐시 키는 불변이라 run_id로 새로 저장)
       - uses: actions/cache@v4
+        if: ${{ !inputs.test }}
         with:
           path: state.json
           key: state-${{ github.run_id }}
           restore-keys: state-
 
-      - run: python3 watch.py
+      - if: ${{ inputs.test }}
+        run: test -n "$SLACK_WEBHOOK_URL" && python3 -c "import watch; watch.notify(':white_check_mark: GitHub Actions에서 보낸 빈자리 알림 테스트입니다.')"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - if: ${{ !inputs.test }}
+        run: python3 watch.py
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           WATCH_END: ${{ vars.WATCH_END }}
