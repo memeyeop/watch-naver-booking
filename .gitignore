@@ -4,3 +4,7 @@ watch.log
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+worker/.wrangler/
+node_modules/
+.ignore
+graft/

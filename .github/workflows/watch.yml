@@ -1,8 +1,7 @@
 name: watch
 
+# 상시 감시는 Cloudflare Workers(worker/)가 맡는다. 여기는 수동 실행·테스트용.
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       test:
