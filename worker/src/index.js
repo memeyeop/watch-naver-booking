@@ -35,9 +35,12 @@ async function fetchFreeSlots(item, start, end) {
   if (data.errors) throw new Error(`GraphQL error: ${JSON.stringify(data.errors)}`);
   const hourly = data.data?.schedule?.bizItemSchedule?.hourly;
   if (!Array.isArray(hourly)) throw new Error("응답 구조 변경: hourly 없음");
+  // 지난 시각의 칸도 isUnitSaleDay=true 로 오므로, 시술 시각이 지난 뒤의 취소를 알리지 않도록 걸러낸다
+  const nowKst = new Date(Date.now() + KST_MS).toISOString().slice(0, 16).replace("T", " ");
   return hourly
     .filter((s) => s.isUnitBusinessDay && s.isUnitSaleDay && s.unitBookingCount < s.unitStock)
     .map((s) => s.unitStartTime.slice(0, 16)) // "YYYY-MM-DD HH:MM"
+    .filter((s) => s > nowKst)
     .sort();
 }
 

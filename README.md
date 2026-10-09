@@ -28,11 +28,12 @@ GitHub Actions (watch.yml)
 
 ## 빈자리 판정
 
-네이버 예약의 `hourlySchedule` 쿼리는 디자이너 일정을 30분 단위 칸으로 돌려줍니다. 아래 세 조건을 모두 만족하는 칸을 빈자리로 봅니다.
+네이버 예약의 `hourlySchedule` 쿼리는 디자이너 일정을 30분 단위 칸으로 돌려줍니다. 아래 네 조건을 모두 만족하는 칸을 빈자리로 봅니다.
 
 - `isUnitBusinessDay` 가 true — 영업하는 시간대입니다.
-- `isUnitSaleDay` 가 true — 예약을 받는 칸입니다. 지난 시간이나 디자이너가 막아 둔 칸은 false입니다.
+- `isUnitSaleDay` 가 true — 예약을 받는 칸입니다. 디자이너가 막아 둔 칸은 false입니다.
 - `unitBookingCount` 가 `unitStock` 미만 — 아직 예약이 차지 않았습니다.
+- 시작 시각이 현재(한국 시간) 이후 — 오늘의 지난 칸도 `isUnitSaleDay` 가 true로 오기 때문에, 시술 시각이 지난 뒤에 취소된 칸을 알리지 않도록 따로 거릅니다.
 
 로그인 없이 호출할 수 있는 API이지만 네이버가 공식으로 공개한 API는 아닙니다. 네이버가 예약 페이지를 바꾸면 조회가 실패할 수 있습니다.
 

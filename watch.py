@@ -51,11 +51,14 @@ def fetch_free_slots(item_id: str, start: dt.date, end: dt.date) -> list[str]:
     if "errors" in data:
         raise RuntimeError(f"GraphQL error: {data['errors']}")
     hourly = data["data"]["schedule"]["bizItemSchedule"]["hourly"]
+    # 지난 시각의 칸도 isUnitSaleDay=True 로 오므로, 시술 시각이 지난 뒤의 취소를 알리지 않도록 걸러낸다
+    now_kst = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
     return sorted(
         s["unitStartTime"][:16]  # "YYYY-MM-DD HH:MM"
         for s in hourly
         if s["isUnitBusinessDay"] and s["isUnitSaleDay"]
         and s["unitBookingCount"] < s["unitStock"]
+        and s["unitStartTime"][:16] > now_kst
     )
 
 
