@@ -10,6 +10,8 @@ const QUERY = `query hourlySchedule($scheduleParams: ScheduleParams) {
     unitStartTime unitStock unitBookingCount isUnitBusinessDay isUnitSaleDay
   } } } }`;
 const KST_MS = 9 * 60 * 60 * 1000;
+const HEALTH_KEY = "health"; // 연속 실패 상태 { failSince, alerted } — 정상이면 키 없음
+const ALERT_AFTER_MS = 3 * 60 * 1000; // 실패가 이만큼 이어지면 Slack 장애 알림
 
 const bookingUrl = (item) => `https://m.booking.naver.com/booking/13/bizes/${BUSINESS_ID}/items/${item}`;
 
@@ -31,7 +33,9 @@ async function fetchFreeSlots(item, start, end) {
   if (!res.ok) throw new Error(`naver HTTP ${res.status}`);
   const data = await res.json();
   if (data.errors) throw new Error(`GraphQL error: ${JSON.stringify(data.errors)}`);
-  return data.data.schedule.bizItemSchedule.hourly
+  const hourly = data.data?.schedule?.bizItemSchedule?.hourly;
+  if (!Array.isArray(hourly)) throw new Error("응답 구조 변경: hourly 없음");
+  return hourly
     .filter((s) => s.isUnitBusinessDay && s.isUnitSaleDay && s.unitBookingCount < s.unitStock)
     .map((s) => s.unitStartTime.slice(0, 16)) // "YYYY-MM-DD HH:MM"
     .sort();
@@ -86,16 +90,48 @@ async function run(env) {
 
   // TEST_DESIGNERS="4328420=유나(테스트),..." 로 감시 대상을 임시 추가
   const extra = (env.TEST_DESIGNERS ?? "").split(",").filter(Boolean).map((p) => p.split("="));
+  const failures = [];
   for (const [item, name] of [...Object.entries(DESIGNERS), ...extra]) {
-    const free = await fetchFreeSlots(item, today, end);
-    const prevRaw = await env.STATE.get(item);
-    const prev = new Set(prevRaw ? JSON.parse(prevRaw) : []);
-    const fresh = free.filter((s) => !prev.has(s));
-    console.log(`${name}: free=${free.length} new=${fresh.length}`);
-    if (fresh.length) await notify(env, formatMessage(name, item, fresh, env.APP_LINK_BASE));
-    const next = JSON.stringify(free);
-    if (next !== prevRaw) await env.STATE.put(item, next); // KV 무료 write 한도(1000/일) 보호
+    try {
+      await watchDesigner(env, item, name, today, end);
+    } catch (e) {
+      console.error(`${name}: 실패 ${e.message}`);
+      failures.push(`${name}: ${e.message.slice(0, 300)}`);
+    }
   }
+  await updateHealth(env, failures);
+}
+
+async function watchDesigner(env, item, name, today, end) {
+  const started = Date.now();
+  const free = await fetchFreeSlots(item, today, end);
+  const naverMs = Date.now() - started;
+  const prevRaw = await env.STATE.get(item);
+  const prev = new Set(prevRaw ? JSON.parse(prevRaw) : []);
+  const fresh = free.filter((s) => !prev.has(s));
+  console.log(`${name}: free=${free.length} new=${fresh.length} naver=${naverMs}ms`);
+  if (fresh.length) await notify(env, formatMessage(name, item, fresh, env.APP_LINK_BASE));
+  const next = JSON.stringify(free);
+  if (next !== prevRaw) await env.STATE.put(item, next); // KV 무료 write 한도(1000/일) 보호
+}
+
+// 실패가 ALERT_AFTER_MS 이상 이어지면 한 번 알리고, 복구되면 복구를 알린다.
+// KV에는 상태가 바뀔 때만 쓴다(첫 실패, 알림 발송, 복구).
+async function updateHealth(env, failures) {
+  const raw = await env.STATE.get(HEALTH_KEY);
+  const health = raw ? JSON.parse(raw) : null;
+  const now = Date.now();
+  if (!failures.length) {
+    if (!health) return;
+    const minutes = Math.round((now - health.failSince) / 60000);
+    if (health.alerted) await notify(env, `:white_check_mark: 빈자리 감시가 복구되었습니다 (약 ${minutes}분 중단)`);
+    return env.STATE.delete(HEALTH_KEY);
+  }
+  if (!health) return env.STATE.put(HEALTH_KEY, JSON.stringify({ failSince: now, alerted: false }));
+  if (health.alerted || now - health.failSince < ALERT_AFTER_MS) return;
+  const minutes = Math.round((now - health.failSince) / 60000);
+  await notify(env, [`:warning: 빈자리 감시가 ${minutes}분째 실패하고 있습니다`, ...failures].join("\n"));
+  await env.STATE.put(HEALTH_KEY, JSON.stringify({ ...health, alerted: true }));
 }
 
 export default {

@@ -9,7 +9,8 @@ Cloudflare Workers (naver-slot-watch)
  ├─ Cron: 1분마다 실행
  │   ├─ 네이버 예약 GraphQL 조회 (hourlySchedule)
  │   ├─ 직전 빈자리 목록과 비교 (KV: STATE)
- │   └─ 새 빈자리가 있으면 Slack Incoming Webhook 발송
+ │   ├─ 새 빈자리가 있으면 Slack Incoming Webhook 발송
+ │   └─ 조회 실패가 3분 이상 이어지면 장애 알림, 복구되면 복구 알림
  └─ HTTP: /go/<itemId>
      └─ 네이버 앱 호출 중계 페이지 (iOS 스킴 / Android intent)
 
@@ -48,6 +49,16 @@ GitHub Actions (watch.yml)
 - KV에는 빈자리 목록이 바뀔 때만 씁니다. 무료 플랜의 하루 쓰기 한도(1,000회)를 지키기 위해서입니다.
 - 감시 범위는 오늘(한국 시간)부터 `WATCH_END` 까지입니다. 이 날짜가 지나면 조회를 건너뜁니다.
 
+## 장애 알림
+
+조회가 실패하면 "빈자리 없음"과 구분할 수 없으므로, 실패가 이어지면 따로 알립니다.
+
+- HTTP 오류, GraphQL 오류, JSON이 아닌 응답(차단 페이지 등), 응답 구조 변경을 모두 실패로 셉니다.
+- 실패가 3분 이상 이어지면 Slack으로 한 번 알립니다. 실패가 계속되어도 다시 알리지 않습니다.
+- 장애 알림 뒤 조회가 성공하면 복구 알림을 보냅니다. 3분 안에 회복된 실패는 알리지 않습니다.
+- 실패 상태는 KV의 `health` 키에 둡니다. 정상일 때는 키가 없고, 첫 실패·장애 알림·복구 때만 씁니다.
+- Worker 자체가 실행되지 않는 장애(Cron 중단, 계정 문제)는 이 장치로 알 수 없습니다.
+
 ## 설정값
 
 | 이름 | 종류 | 위치 | 설명 |
@@ -70,7 +81,7 @@ cd worker && npx wrangler secret put SLACK_WEBHOOK_URL
 cd worker && npx wrangler deploy
 ```
 
-배포 후 실행 로그는 아래 명령으로 볼 수 있습니다. 매분 `현지: free=0 new=0` 같은 줄이 찍히면 정상입니다.
+배포 후 실행 로그는 아래 명령으로 볼 수 있습니다. 매분 `현지: free=0 new=0 naver=850ms` 같은 줄이 찍히면 정상입니다. `naver` 는 네이버 조회에 걸린 시간입니다.
 
 ```bash
 cd worker && npx wrangler tail
