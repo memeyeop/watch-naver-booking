@@ -159,7 +159,7 @@ HTTP 오류, GraphQL 오류, JSON이 아닌 응답, 응답 구조 변경을 실�
 
 ## 4. 테스트
 
-### 단위 테스트 (`node --test worker/test/`)
+### 단위 테스트 (`node --test worker/test/*.test.mjs`)
 
 | 대상 | 확인할 것 |
 |---|---|

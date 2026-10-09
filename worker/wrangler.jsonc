@@ -8,6 +8,9 @@
   "triggers": { "crons": ["* * * * *"] },
   "vars": { "WATCH_END": "2026-10-31", "APP_LINK_BASE": "https://naver-slot-watch.memeyeop.workers.dev" },
   "kv_namespaces": [{ "binding": "STATE", "id": "b9accf9feb8a454b91efc941f2c05813" }],
+  // 감시 루프. 무료 플랜은 SQLite 저장소만 쓸 수 있다
+  "durable_objects": { "bindings": [{ "name": "WATCHER", "class_name": "Watcher" }] },
+  "exports": { "Watcher": { "type": "durable-object", "storage": "sqlite" } },
   "observability": { "enabled": true }
   // SLACK_WEBHOOK_URL 은 `wrangler secret put` 으로 등록
 }

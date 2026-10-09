@@ -1,48 +1,13 @@
-// 네이버 예약 디자이너 빈자리 감시 → Slack 알림 (Cloudflare Workers Cron)
-// 빈자리 = isUnitBusinessDay && isUnitSaleDay && unitBookingCount < unitStock
-// 직전 실행에서 못 본 빈자리가 생겼을 때만 알린다(KV에 상태 저장, 바뀔 때만 write).
+// 네이버 예약 디자이너 빈자리 감시 → Slack 알림
+// 감시 루프는 Durable Object(Watcher)의 알람이 돌고, 1분 Cron 은 루프가 살아 있는지만 확인한다.
 
-const BUSINESS_ID = "648081"; // 헤어베이커
-const DESIGNERS = { "4347340": "현지" }; // bizItemId: 이름 (유나=4328420)
-const GRAPHQL_URL = "https://m.booking.naver.com/graphql?opName=hourlySchedule";
-const QUERY = `query hourlySchedule($scheduleParams: ScheduleParams) {
-  schedule(input: $scheduleParams) { bizItemSchedule { hourly {
-    unitStartTime unitStock unitBookingCount isUnitBusinessDay isUnitSaleDay
-  } } } }`;
-const KST_MS = 9 * 60 * 60 * 1000;
-const HEALTH_KEY = "health"; // 연속 실패 상태 { failSince, alerted } — 정상이면 키 없음
-const ALERT_AFTER_MS = 3 * 60 * 1000; // 실패가 이만큼 이어지면 Slack 장애 알림
+import { bookingUrl, notify, trackFailure, watchdogFailSince } from "./core.js";
+export { Watcher } from "./watcher.js";
 
-const bookingUrl = (item) => `https://m.booking.naver.com/booking/13/bizes/${BUSINESS_ID}/items/${item}`;
+const WATCHDOG_KEY = "watchdog"; // 감시자 상태 { failSince, alerted } — 정상이면 키 없음
 
-async function fetchFreeSlots(item, start, end) {
-  const res = await fetch(GRAPHQL_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0", Referer: bookingUrl(item) },
-    body: JSON.stringify({
-      operationName: "hourlySchedule",
-      query: QUERY,
-      variables: { scheduleParams: {
-        businessTypeId: 13, businessId: BUSINESS_ID, bizItemId: item,
-        startDateTime: `${start}T00:00:00`, endDateTime: `${end}T23:59:59`,
-        fixedTime: true, includesHolidaySchedules: true,
-      } },
-    }),
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!res.ok) throw new Error(`naver HTTP ${res.status}`);
-  const data = await res.json();
-  if (data.errors) throw new Error(`GraphQL error: ${JSON.stringify(data.errors)}`);
-  const hourly = data.data?.schedule?.bizItemSchedule?.hourly;
-  if (!Array.isArray(hourly)) throw new Error("응답 구조 변경: hourly 없음");
-  // 지난 시각의 칸도 isUnitSaleDay=true 로 오므로, 시술 시각이 지난 뒤의 취소를 알리지 않도록 걸러낸다
-  const nowKst = new Date(Date.now() + KST_MS).toISOString().slice(0, 16).replace("T", " ");
-  return hourly
-    .filter((s) => s.isUnitBusinessDay && s.isUnitSaleDay && s.unitBookingCount < s.unitStock)
-    .map((s) => s.unitStartTime.slice(0, 16)) // "YYYY-MM-DD HH:MM"
-    .filter((s) => s > nowKst)
-    .sort();
-}
+// locationHint 는 객체가 처음 만들어질 때만 적용되므로 stub 은 반드시 여기서만 만든다
+const getWatcher = (env) => env.WATCHER.get(env.WATCHER.idFromName("main"), { locationHint: "apac-ne" });
 
 // Slack 인앱 브라우저 대신 로그인된 네이버 앱으로 예약 페이지를 여는 중계 페이지
 function appRedirectPage(item) {
@@ -62,79 +27,36 @@ document.getElementById("app").href=u;location.href=u;</script></body></html>`;
   return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-function formatMessage(name, item, slots, linkBase) {
-  const byDay = {};
-  for (const s of slots) (byDay[s.slice(0, 10)] ??= []).push(s.slice(11));
-  const lines = [`:scissors: *${name}* 디자이너 빈자리 ${slots.length}칸이 새로 열렸습니다`];
-  for (const [day, times] of Object.entries(byDay)) {
-    const wd = "일월화수목금토"[new Date(`${day}T00:00:00Z`).getUTCDay()];
-    lines.push(`• ${day}(${wd}) ${times.join(", ")}`);
+// 감시 루프가 멈췄으면 알리고, 다시 돌면 재개를 알린다. KV에는 상태가 바뀔 때만 쓴다.
+async function watchdog(env) {
+  if (env.TEST_MESSAGE) await notify(env, env.TEST_MESSAGE); // 배포 검증용 1회성
+
+  let status;
+  try {
+    status = { ok: true, ...(await getWatcher(env).ensure()) };
+  } catch (e) {
+    console.error(`감시자: ensure 실패 ${e.message}`);
+    status = { ok: false, error: e.message };
   }
-  lines.push(linkBase ? `<${linkBase}/go/${item}|네이버 앱으로 예약하기>` : `<${bookingUrl(item)}|예약하러 가기>`);
-  return lines.join("\n");
-}
+  if (status.paused) return console.log("감시자: 감시 중지 상태 - 판정 생략");
 
-async function notify(env, text) {
-  const res = await fetch(env.SLACK_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`slack HTTP ${res.status}: ${await res.text()}`);
-}
-
-async function run(env) {
-  if (env.TEST_MESSAGE) return notify(env, env.TEST_MESSAGE); // 배포 검증용 1회성
-
-  const today = new Date(Date.now() + KST_MS).toISOString().slice(0, 10);
-  const end = env.WATCH_END;
-  if (today > end) return console.log(`감시 기간(${end}) 종료 - 건너뜀`);
-
-  // TEST_DESIGNERS="4328420=유나(테스트),..." 로 감시 대상을 임시 추가
-  const extra = (env.TEST_DESIGNERS ?? "").split(",").filter(Boolean).map((p) => p.split("="));
-  const failures = [];
-  for (const [item, name] of [...Object.entries(DESIGNERS), ...extra]) {
-    try {
-      await watchDesigner(env, item, name, today, end);
-    } catch (e) {
-      console.error(`${name}: 실패 ${e.message}`);
-      failures.push(`${name}: ${e.message.slice(0, 300)}`);
-    }
-  }
-  await updateHealth(env, failures);
-}
-
-async function watchDesigner(env, item, name, today, end) {
-  const started = Date.now();
-  const free = await fetchFreeSlots(item, today, end);
-  const naverMs = Date.now() - started;
-  const prevRaw = await env.STATE.get(item);
-  const prev = new Set(prevRaw ? JSON.parse(prevRaw) : []);
-  const fresh = free.filter((s) => !prev.has(s));
-  console.log(`${name}: free=${free.length} new=${fresh.length} naver=${naverMs}ms`);
-  if (fresh.length) await notify(env, formatMessage(name, item, fresh, env.APP_LINK_BASE));
-  const next = JSON.stringify(free);
-  if (next !== prevRaw) await env.STATE.put(item, next); // KV 무료 write 한도(1000/일) 보호
-}
-
-// 실패가 ALERT_AFTER_MS 이상 이어지면 한 번 알리고, 복구되면 복구를 알린다.
-// KV에는 상태가 바뀔 때만 쓴다(첫 실패, 알림 발송, 복구).
-async function updateHealth(env, failures) {
-  const raw = await env.STATE.get(HEALTH_KEY);
-  const health = raw ? JSON.parse(raw) : null;
   const now = Date.now();
-  if (!failures.length) {
-    if (!health) return;
-    const minutes = Math.round((now - health.failSince) / 60000);
-    if (health.alerted) await notify(env, `:white_check_mark: 빈자리 감시가 복구되었습니다 (약 ${minutes}분 중단)`);
-    return env.STATE.delete(HEALTH_KEY);
+  const raw = await env.STATE.get(WATCHDOG_KEY);
+  const prev = raw ? JSON.parse(raw) : null;
+  const { state, event } = trackFailure(prev, watchdogFailSince(status, now), now);
+  if (event === "alert") {
+    const reason = status.ok
+      ? `마지막 완료 ${Math.round((now - state.failSince) / 60000)}분 전`
+      : `Watcher 호출 실패: ${status.error.slice(0, 300)}`;
+    await notify(env, `:rotating_light: 빈자리 감시 루프가 멈췄습니다 (${reason})`);
+  } else if (event === "recover") {
+    await notify(env, ":white_check_mark: 빈자리 감시 루프가 다시 동작합니다");
   }
-  if (!health) return env.STATE.put(HEALTH_KEY, JSON.stringify({ failSince: now, alerted: false }));
-  if (health.alerted || now - health.failSince < ALERT_AFTER_MS) return;
-  const minutes = Math.round((now - health.failSince) / 60000);
-  await notify(env, [`:warning: 빈자리 감시가 ${minutes}분째 실패하고 있습니다`, ...failures].join("\n"));
-  await env.STATE.put(HEALTH_KEY, JSON.stringify({ ...health, alerted: true }));
+  if (!state) {
+    if (prev) await env.STATE.delete(WATCHDOG_KEY);
+  } else if (JSON.stringify(state) !== raw) {
+    await env.STATE.put(WATCHDOG_KEY, JSON.stringify(state));
+  }
 }
 
 export default {
@@ -143,6 +65,6 @@ export default {
     return m ? appRedirectPage(m[1]) : new Response("Not Found", { status: 404 });
   },
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(run(env));
+    ctx.waitUntil(watchdog(env));
   },
 };
