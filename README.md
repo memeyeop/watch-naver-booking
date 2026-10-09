@@ -109,7 +109,13 @@ cd worker && npx wrangler secret put SLACK_WEBHOOK_URL
 cd worker && npx wrangler deploy
 ```
 
-배포 후 실행 로그는 아래 명령으로 볼 수 있습니다. 약 10초마다 `현지: free=0 new=0 naver=220ms` 같은 줄이 찍히면 정상입니다. `naver` 는 네이버 조회에 걸린 시간입니다.
+### 동작 확인
+
+정상이면 Watcher가 약 10초마다 `현지: free=0 new=0 naver=220ms` 같은 로그를 남깁니다. `naver` 는 네이버 조회에 걸린 시간입니다.
+
+- **대시보드 (평소 확인)** — Cloudflare 대시보드의 Workers & Pages → naver-slot-watch → Logs에서 봅니다. Cloudflare 문서에 따르면 Durable Object의 로그도 대시보드에 표시됩니다.
+- **`wrangler tail` (배포 직후만)** — tail은 연결하기 전부터 실행 중이던 Watcher의 로그를 보여 주지 않았습니다(2026-10-09 실측). 배포 직후 새 코드가 적용될 때는 보이지만, 평소에 tail을 걸면 1분 Cron 이벤트만 보이고 Watcher 로그는 비어 있습니다. 로그가 비어 있다고 감시가 멈춘 것은 아닙니다.
+- **멈춤 여부** — 감시 루프가 멈추면 감시자가 Slack으로 알리므로, 멈춤 알림이 없으면 루프는 돌고 있습니다.
 
 ```bash
 cd worker && npx wrangler tail
