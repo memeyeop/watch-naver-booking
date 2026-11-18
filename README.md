@@ -95,7 +95,7 @@ GitHub Actions (watch.yml)
 | `APP_LINK_BASE` | 변수 | `wrangler.jsonc` | 중계 페이지 주소. 없으면 웹 예약 링크를 씀 |
 | `TEST_DESIGNERS` | 변수 | 배포 시 `--var` | 감시 대상 임시 추가 (`ID=이름,…`) |
 | `TEST_MESSAGE` | 변수 | 배포 시 `--var` | 설정 시 이 메시지를 매분 발송 |
-| `WATCHER_PAUSED` | 변수 | 배포 시 `--var` | 설정 시 알람 루프를 멈춤 (정지 스위치) |
+| `WATCHER_PAUSED` | 변수 | `wrangler.jsonc`, 배포 시 `--var` | 설정 시 알람 루프를 멈춤 (정지 스위치). 현재 켜져 있음 |
 
 Webhook 주소는 레포에 넣지 않습니다. Cloudflare에는 아래 명령으로 등록합니다.
 
@@ -184,7 +184,15 @@ Durable Object 실행 시간은 객체가 하루 종일 메모리에 있다고 �
 
 ## 감시 종료
 
-잠시 멈출 때는 정지 스위치를 씁니다. 다시 켜려면 변수 없이 배포합니다.
+**2026-11-17부터 감시를 멈춰 두었습니다.** `wrangler.jsonc` 의 `vars` 에 `WATCHER_PAUSED` 가 들어 있습니다. 이 값이 있는 동안 Watcher는 알람을 걸지 않고, 1분 Cron은 멈춤 판정을 건너뜁니다. 네이버 조회와 Slack 알림이 모두 멈추며, 중계 페이지(`/go/<itemId>`)만 계속 응답합니다.
+
+다시 켜려면 `wrangler.jsonc` 에서 `WATCHER_PAUSED` 줄을 지우고 배포합니다. 설정에 넣어 둔 이유가 이것입니다. 배포 시 변수로만 멈춰 두면 누군가 변수 없이 다시 배포했을 때 감시가 되살아납니다.
+
+```bash
+cd worker && npx wrangler deploy
+```
+
+설정을 고치지 않고 잠시만 멈출 때는 배포 시 변수로 켭니다.
 
 ```bash
 cd worker && npx wrangler deploy --var WATCHER_PAUSED:1

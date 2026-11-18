@@ -6,7 +6,12 @@
   "workers_dev": true,
   "preview_urls": false,
   "triggers": { "crons": ["* * * * *"] },
-  "vars": { "WATCH_END": "2026-11-30", "APP_LINK_BASE": "https://naver-slot-watch.memeyeop.workers.dev" },
+  // WATCHER_PAUSED: 2026-11-17 감시 종료. 다시 켜려면 이 키를 지우고 배포한다
+  "vars": {
+    "WATCH_END": "2026-11-30",
+    "APP_LINK_BASE": "https://naver-slot-watch.memeyeop.workers.dev",
+    "WATCHER_PAUSED": "1"
+  },
   "kv_namespaces": [{ "binding": "STATE", "id": "b9accf9feb8a454b91efc941f2c05813" }],
   // 감시 루프. 무료 플랜은 SQLite 저장소만 쓸 수 있다
   "durable_objects": { "bindings": [{ "name": "WATCHER", "class_name": "Watcher" }] },
